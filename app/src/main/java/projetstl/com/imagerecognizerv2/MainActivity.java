@@ -195,7 +195,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             sift.compute(images[i], key[i], descriptors[i]);
         }
 
-
         BFMatcher matcher = new BFMatcher();
         // opencv_features2d.BFMatcher matcher = new
         // opencv_features2d.BFMatcher();

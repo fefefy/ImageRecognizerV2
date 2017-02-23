@@ -15,7 +15,7 @@ public class Analysis extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.analysis);
+        setContentView(R.layout.image_analysis);
         ImageView AnalysisImageView = (ImageView) findViewById(R.id.AnalysisImageView);
         Intent i = getIntent();
         Bundle extras = i.getExtras();

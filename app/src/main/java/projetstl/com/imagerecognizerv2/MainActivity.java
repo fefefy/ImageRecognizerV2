@@ -117,6 +117,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     //Camera picture Intent
     private void dispatchTakePictureIntent() {
         Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+
+
+
+
         if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
             // Create the File from taken picture
             File photoFile = null;
@@ -232,7 +236,7 @@ String test;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.img_select);
+        setContentView(R.layout.main_activity);
         progressBar = (ProgressBar) findViewById(R.id.pBar);
         progressBar.setVisibility(View.GONE);
         imageView = (ImageView) findViewById(R.id.imageView);

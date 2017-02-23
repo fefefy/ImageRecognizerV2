@@ -1,367 +1,446 @@
 package projetstl.com.imagerecognizerv2;
 
-import android.Manifest;
+import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.AssetManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
-import android.os.Environment;
-import android.os.Handler;
-import android.provider.MediaStore;
-import android.support.v4.app.ActivityCompat;
-import android.support.v7.app.AppCompatActivity;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.provider.MediaStore.Images;
+import android.support.v4.content.FileProvider;
+import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
+import android.widget.ProgressBar;
 import android.widget.Toast;
 
+import com.android.volley.Request;
+import com.android.volley.RequestQueue;
+import com.android.volley.Response;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.JsonObjectRequest;
+import com.android.volley.toolbox.StringRequest;
+import com.android.volley.toolbox.Volley;
+import com.soundcloud.android.crop.Crop;
+
+import org.bytedeco.javacpp.Pointer;
 import org.bytedeco.javacpp.opencv_core;
-import org.bytedeco.javacpp.opencv_features2d;
-import org.bytedeco.javacpp.opencv_nonfree;
+import org.bytedeco.javacpp.opencv_features2d.BOWImgDescriptorExtractor;
+import org.bytedeco.javacpp.opencv_features2d.FlannBasedMatcher;
+import org.bytedeco.javacpp.opencv_ml.CvSVM;
+import org.bytedeco.javacpp.opencv_nonfree.SIFT;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
-import static org.bytedeco.javacpp.opencv_core.NORM_L2;
-import static org.bytedeco.javacpp.opencv_features2d.*;
-import static org.bytedeco.javacpp.opencv_highgui.*;
-
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.OutputStreamWriter;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 
+import static org.bytedeco.javacpp.opencv_core.CV_STORAGE_READ;
+import static org.bytedeco.javacpp.opencv_core.Mat;
+import static org.bytedeco.javacpp.opencv_core.cvAttrList;
+import static org.bytedeco.javacpp.opencv_core.cvOpenFileStorage;
+import static org.bytedeco.javacpp.opencv_core.cvReadByName;
+import static org.bytedeco.javacpp.opencv_core.cvReleaseFileStorage;
+import static org.bytedeco.javacpp.opencv_features2d.KeyPoint;
+import static org.bytedeco.javacpp.opencv_highgui.imread;
 
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
 
-
-    // SIFT keypoint features
-    private static final int N_FEATURES = 0;
-    private static final int N_OCTAVE_LAYERS = 3;
-    private static final double CONTRAST_THRESHOLD = 0.04;
-    private static final double EDGE_THRESHOLD = 10;
-    private static final double SIGMA = 1.6;
-
-    public opencv_core.Mat img;
-    private opencv_nonfree.SIFT SiftDesc;
-
-    private String filePath;
-
+    private static final int CAMERA_REQUEST = 1;
+    private static int RESULT_LOAD_IMAGE = 2;
     private ImageView imageView;
-    private Bitmap inputImage;
+    private ProgressBar progressBar;
+    String currentPhotoPath;
+    File vocab;
 
-    private File imageFile;
-    private String CurrentPhotoPath;
-    private static int LOAD_IMAGE = 1;
-    private String ImageString;
-    private String temp;
-    private int READ_PERMISSION = 1;
-    private Handler h = new Handler();
-    private AssetManager assetManager;
-    private ArrayList<String> listImages;
+    String urlRequest = "http://www-rech.telecom-lille.fr/nonfreesift/";
+    List<Brand> brandsList = new ArrayList<>();
+    RequestQueue queue;
 
+    boolean mustBeRotated = false;
+    SIFT detector;
+    FlannBasedMatcher matcher;
+    BOWImgDescriptorExtractor bowide;
+    String[] class_names;
+    CvSVM[] classifiers;
+    Mat response_hist = new Mat();
+    KeyPoint keypoints = new KeyPoint();
+    Mat inputDescriptors = new Mat();
 
-    public static File ToCache(Context context, String Path, String fileName) {
-        InputStream input;
-        FileOutputStream output;
-        byte[] buffer;
-        String filePath = context.getCacheDir() + "/" + fileName;
-        File file = new File(filePath);
-        AssetManager assetManager = context.getAssets();
+    protected boolean shouldAskPermissions() {
+        return (Build.VERSION.SDK_INT > Build.VERSION_CODES.LOLLIPOP_MR1);
+    }
 
-        try {
-            input = assetManager.open(Path);
-            buffer = new byte[input.available()];
-            input.read(buffer);
-            input.close();
+    //cf. OnCreate, pb with permissions with gallery
+    @TargetApi(Build.VERSION_CODES.M)
+    protected void askPermissions() {
+        String[] permissions = {
+                "android.permission.READ_EXTERNAL_STORAGE",
+                "android.permission.WRITE_EXTERNAL_STORAGE"
+        };
+        int requestCode = 200;
+        requestPermissions(permissions, requestCode);
+    }
 
-            output = new FileOutputStream(filePath);
-            output.write(buffer);
-            output.close();
-            return file;
+    //for the camera picture
+    private File createImageFile() throws IOException {
 
-        } catch (IOException e) {
-            e.printStackTrace();
-            return null;
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        String imageFileName = "JPEG_" + timeStamp + "_";
+        File storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+        File image = File.createTempFile(
+                imageFileName,  /* prefix */
+                ".jpg",         /* suffix */
+                storageDir      /* directory */
+        );
+
+        currentPhotoPath = image.getAbsolutePath();
+        return image;
+    }
+
+    //Camera picture Intent
+    private void dispatchTakePictureIntent() {
+        Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
+            // Create the File from taken picture
+            File photoFile = null;
+            try {
+                photoFile = createImageFile();
+            } catch (IOException ex) {
+            }
+            // if successfull :
+            if (photoFile != null) {
+                System.out.println("Récupération de l'URI photo");
+                Uri photoURI = FileProvider.getUriForFile(this,
+                        "com.example.android.fileprovider",
+                        photoFile);
+                takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoURI);
+                System.out.println("Début activité");
+                startActivityForResult(takePictureIntent, CAMERA_REQUEST);
+            }
+        }
+    }
+String test;
+
+    //2 Crop parts from :
+   // https://github.com/jdamcd/android-crop
+    private void beginCrop(Uri source) {
+        Uri destination = Uri.fromFile(new File(getCacheDir(), "cropped"));
+        Crop.of(source, destination).withMaxSize(imageView.getHeight(),imageView.getWidth()).start(this);
+        System.out.println("Crop OK");
+    }
+    private void handleCrop(int resultCode, Intent result) {
+        if (resultCode == RESULT_OK) {
+            imageView.setImageURI(Crop.getOutput(result));
+        } else if (resultCode == Crop.RESULT_ERROR) {
+            Toast.makeText(this, Crop.getError(result).getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
+    //Used by Camera & Gallery
+    private void ImageViewPrint() {
 
-//        String refFile = "Pepsi_13.jpg";
-//        this.filePath = this.ToCache(this, "TestImage" + "/" + refFile, refFile).getPath();
+        // Get View's dimensions
+        int targetWidth = imageView.getWidth();
+        int targetHeight = imageView.getHeight();
 
-        String test[] = new String[0];
-        try {
-            test = this.getAssets().list("TrainImage");
+        // Get bitmap's dimensions
+        BitmapFactory.Options BitmapOpt = new BitmapFactory.Options();
+        BitmapOpt.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(currentPhotoPath, BitmapOpt);
+        int photoWidth = BitmapOpt.outWidth;
+        int photoHeight = BitmapOpt.outHeight;
+
+        // Scaling image ratio
+        int scaleFactor = Math.min(photoWidth / targetWidth, photoHeight / targetHeight);
+
+        // Setting up bitmap parameters
+        BitmapOpt.inJustDecodeBounds = false;
+        BitmapOpt.inSampleSize = scaleFactor;
+        BitmapOpt.inPurgeable = true;
+        System.out.println("Decoding ok");
+
+        Bitmap bitmap = BitmapFactory.decodeFile(currentPhotoPath, BitmapOpt);
+        imageView.setVisibility(View.VISIBLE);
+
+        //Rotating image if photo is from camera then print
+        System.out.println("valeur de must be rotated " + mustBeRotated);
+        if (mustBeRotated = false){
+            imageView.setImageBitmap(bitmap);
+            System.out.println("on est dans le if");
+        }
+        else if (mustBeRotated = true){
+            System.out.println("On est dans le else");
+            imageView.setRotation(90);
+            imageView.setImageBitmap(bitmap);
+        }
+        else System.out.println("Error rotating");
+    }
+
+    //Methode to create files from data
+    public static File writeToFile(String data, String fileName)
+    {
+        // Get the directory for the user's public pictures directory.
+        final File path = Environment.getExternalStorageDirectory();
+        if(!path.exists())
+        {
+            // Create dir if it does not exist
+            path.mkdirs();
+        }
+        final File file = new File(path, fileName);
+        // Save your stream, don't forget to flush() it before closing it.
+
+        try
+        {
+            file.createNewFile();
+            FileOutputStream fOut = new FileOutputStream(file);
+            OutputStreamWriter myOutWriter = new OutputStreamWriter(fOut);
+            myOutWriter.append(data);
+            myOutWriter.close();
+            fOut.flush();
+            fOut.close();
+
         } catch (IOException e) {
             e.printStackTrace();
         }
-        InputStream input;
-        Bitmap bm;
-        String filePaths[] = new String[test.length];
-        opencv_core.Mat images[] = new opencv_core.Mat[test.length];
-        opencv_features2d.KeyPoint keypoints[] = new opencv_features2d.KeyPoint[test.length];
-        for (int i = 0; i < test.length; i++) {
-            keypoints[i] = new KeyPoint();
 
+        return file;
+    }
+
+    public Uri getImageUri(Context context, Bitmap inputImage) {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        inputImage.compress(Bitmap.CompressFormat.JPEG, 100, bytes);
+        String path = Images.Media.insertImage(context.getContentResolver(), inputImage, "Title", null);
+        return Uri.parse(path);
+    }
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.img_select);
+        progressBar = (ProgressBar) findViewById(R.id.pBar);
+        progressBar.setVisibility(View.GONE);
+        imageView = (ImageView) findViewById(R.id.imageView);
+
+        //Asking permission to access user's gallery
+        if (shouldAskPermissions()) {
+            askPermissions();
+        }
+        //
+        Button camera_button = (Button) findViewById(R.id.CameraButton);
+        camera_button.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dispatchTakePictureIntent();
+            }
+        });
+        Button gallery_button = (Button) findViewById(R.id.galleryButton);
+        gallery_button.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent galleryIntent = new Intent(Intent.ACTION_PICK, Images.Media.EXTERNAL_CONTENT_URI);
+                startActivityForResult(galleryIntent, RESULT_LOAD_IMAGE);
+            }
+        });
+
+        queue = Volley.newRequestQueue(this);
+        JsonObjectRequest jsonRequest = new JsonObjectRequest(Request.Method.GET, urlRequest+"index.json", null,
+                new Response.Listener<JSONObject>() {
+                    @Override
+                    public void onResponse(JSONObject json) {
+                        //traitement du fichier json
+                        try {
+                            String vocabs = json.getString("vocabulary");
+                            StringRequest stringRequest = new StringRequest(Request.Method.GET, urlRequest+vocabs, new Response.Listener<String>() {
+                                @Override
+                                public void onResponse(String response) {
+                                    //	Display	the	first	500	characters	of	the	response	string.
+                                    vocab = writeToFile(response, "vocabulary.yml");
+
+                                }
+                            },
+                                    new Response.ErrorListener() {
+                                        @Override
+                                        public void onErrorResponse(VolleyError error) {
+                                        }
+                                    });
+                            queue.add(stringRequest);
+                            JSONArray brands = json.getJSONArray("brands");
+                            for (int i = 0; i<brands.length(); i++){
+                                JSONObject x = brands.getJSONObject(i);
+                                brandsList.add(new Brand(x.getString("brandname"), x.getString("url"),x.getString("classifier")));
+                                JSONArray imgs = x.getJSONArray("images");
+                                for (int j = 0; j<imgs.length(); j++){
+                                    String y = imgs.getString(j);
+                                    brandsList.get(i).setImgNames(y);
+                                }
+                                brandsList.get(i).setClassifier(queue, urlRequest);
+                                brandsList.get(i).setImage(queue, urlRequest);
+                            }
+
+                        } catch (JSONException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                },
+                new Response.ErrorListener() {
+                    @Override
+                    public void onErrorResponse(VolleyError error) {
+                    }
+                });
+        queue.add(jsonRequest);
+
+        //getClassifier part
+
+        Button Analysis_Button = (Button) findViewById(R.id.Analyse_Button);
+        Analysis_Button.setOnClickListener(this);
+
+        Button Crop_Button = (Button) findViewById(R.id.Crop_Button);
+        Crop_Button.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Uri cropURI = Uri.parse("file:///" + currentPhotoPath);
+                imageView.setImageDrawable(null);
+                beginCrop(cropURI);
+
+            }
+        });
+    }
+
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == CAMERA_REQUEST && resultCode == Activity.RESULT_OK) {
+            System.out.println("Into Activity Result");
+            mustBeRotated = true;
+            ImageViewPrint();
+            System.out.println("Set pic OK ");
+        }
+        if (requestCode == RESULT_LOAD_IMAGE && resultCode == RESULT_OK && null != data) {
+            Uri selectedImage = data.getData();
+            String[] filePathColumn = {Images.Media.DATA};
+            Cursor cursor = getContentResolver().query(selectedImage, filePathColumn, null, null, null);
+            cursor.moveToFirst();
+            int columnIndex = cursor.getColumnIndex(filePathColumn[0]);
+            currentPhotoPath = cursor.getString(columnIndex);
+            cursor.close();
+            imageView.setRotation(0);
+            mustBeRotated = false;
+            ImageViewPrint();
         }
 
-        BFMatcher matcher = new BFMatcher();
-        DMatchVectorVector matches[] = new DMatchVectorVector[test.length];
-        opencv_core.Mat[] descriptors = new opencv_core.Mat[test.length];
-        DMatchVectorVector bestMatches[] = new DMatchVectorVector[test.length];
-
-        opencv_core.Mat imgRef = imread(this.ToCache(this, "images/Pepsi_10.jpg", "Pepsi_10.jpg").getPath());
-        opencv_features2d.KeyPoint keyPointRef = new opencv_features2d.KeyPoint();
-        opencv_core.Mat descriptorsRef = new opencv_core.Mat();
-
-        SiftDesc = new opencv_nonfree.SIFT(N_FEATURES, N_OCTAVE_LAYERS, CONTRAST_THRESHOLD, EDGE_THRESHOLD, SIGMA);
-
-
-        SiftDesc.detect(imgRef, keyPointRef);
-        SiftDesc.compute(imgRef, keyPointRef, descriptorsRef);
-
-        for (int i = 0; i < test.length; i++) {
-            matches[i] = new DMatchVectorVector();
-            descriptors[i] = new opencv_core.Mat();
-            String refFile = test[i];
-            filePaths[i] = this.ToCache(this, "TrainImage" + "/" + refFile, refFile).getPath();
-            images[i] = imread(filePaths[i]);
-            SiftDesc.detect(images[i], keypoints[i]);
-            SiftDesc.compute(images[i], keypoints[i], descriptors[i]);
-            matcher.knnMatch(descriptorsRef, descriptors[i], matches[i], 2);
-            bestMatches[i] = refineMatches(matches[i]);
+        if (requestCode == Crop.REQUEST_CROP) {
+            handleCrop(resultCode, data);
         }
-
-
-        ImageView imageView = (ImageView) findViewById(R.id.Pictures_ImageView);
-        Bitmap bitmap = BitmapFactory.decodeFile(filePath);
-        //imageView.setImageBitmap(bitmap);
-
-        Button keypointsButton = (Button) findViewById(R.id.Analyse_button);
-
-        keypointsButton.setOnClickListener(this);
-
     }
 
     @Override
     public void onClick(View view) {
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
 
-        img = imread(this.filePath);
-        SiftDesc = new opencv_nonfree.SIFT(N_FEATURES, N_OCTAVE_LAYERS, CONTRAST_THRESHOLD, EDGE_THRESHOLD, SIGMA);
+                final Mat MatVocab;
+                //Loader.load(opencv_core.class);
+                opencv_core.CvFileStorage storage = cvOpenFileStorage(vocab.getAbsolutePath(), null, CV_STORAGE_READ);
+                Pointer p = cvReadByName(storage, null, "vocabulary", cvAttrList());
+                opencv_core.CvMat cvMat = new opencv_core.CvMat(p);
+                MatVocab = new Mat(cvMat);
+                Log.i("Mat Vocab", "vocabulary loaded " + MatVocab.rows() + " x " + MatVocab.cols());
+                cvReleaseFileStorage(storage);
+                //create SIFT feature point extracter
 
-        //opencv_core.Mat descriptor = new opencv_core.Mat();
-        opencv_features2d.KeyPoint keypoints = new opencv_features2d.KeyPoint();
-        SiftDesc.detect(img, keypoints);
+                detector = new SIFT(0, 3, 0.04, 10, 1.6);
+                //create a matcher with FlannBased Euclidien distance (possible also with BruteForce-Hamming)
+                matcher = new FlannBasedMatcher();
 
-        Toast.makeText(this, "Nb of detected keypoints:" + keypoints.capacity(), Toast.LENGTH_LONG).show();
+                //create BoF (or BoW) descriptor extractor
+                bowide = new BOWImgDescriptorExtractor(detector.asDescriptorExtractor(), matcher);
+                //Set the dictionary with the vocabulary we created in the first step
+                bowide.setVocabulary(MatVocab);
+                Log.i("vocab status", "vocab is set");
+                class_names = new String[brandsList.size()];
 
-
-        opencv_core.Mat[] images = new opencv_core.Mat[]{
-
-                imread(this.filePath), imread(this.temp)
-        };
-
-        KeyPoint[] key = {new KeyPoint(), new KeyPoint()};
-        opencv_core.Mat[] descriptors = new opencv_core.Mat[2];
-
-
-        //   KeyPointVector[] keyPoints = {new KeyPointVector(), new KeyPointVector()};
-        int nFeatures = 0;
-        int nOctaveLayers = 3;
-        double contrastThreshold = 0.03;
-        int edgeThreshold = 10;
-        double sigma = 1.6;
-
-        opencv_nonfree.SIFT sift = new opencv_nonfree.SIFT(nFeatures, nOctaveLayers, contrastThreshold, edgeThreshold, sigma);
-
-        // Detect SIFT features and compute descriptors for both images
-        for (int i = 0; i <= 1; i++) {
-
-            // Create Surf Keypoint Detector
-            sift.detect(images[i], key[i]);
-            // Create Surf Extractor
-            descriptors[i] = new opencv_core.Mat();
-            sift.compute(images[i], key[i], descriptors[i]);
-        }
-
-        BFMatcher matcher = new BFMatcher();
-        // opencv_features2d.BFMatcher matcher = new
-        // opencv_features2d.BFMatcher();
-        DMatchVectorVector matches = new DMatchVectorVector();
-
-        long t = System.currentTimeMillis();
-
-        //matcher.knnMatch(descriptors[0],descriptors[1],matches,2);
-
-        DMatchVectorVector bestMatches = refineMatches(matches);
-
-        opencv_core.Mat imageMatches = new opencv_core.Mat();
-        byte[] mask = null;
-
-        //drawMatches(images[0], key[0], images[1], key[1], bestMatches, imageMatches);
-
-        Toast.makeText(this, "Nb of detected keypoints:" + keypoints.capacity(), Toast.LENGTH_LONG).show();
-    }
-
-    //Function to use Camera
-    public void TakePicture(View view) {
-        Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-        imageFile = new File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                "LogoRecognizer.jpg");
-        Uri temp_uri = Uri.fromFile(imageFile);
-        intent.putExtra(MediaStore.EXTRA_OUTPUT, temp_uri);
-        intent.putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1);
-        startActivityForResult(intent, 0);
-        System.out.println("Appareil Photo ouvert");
-    }
-
-    //Function to Add taken image to gallery
-    private void galleryAddPic() {
-        Intent mediaScanIntent = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
-        File imageFile = new File(CurrentPhotoPath);
-        Uri contentUri = Uri.fromFile(imageFile);
-        mediaScanIntent.setData(contentUri);
-        this.sendBroadcast(mediaScanIntent);
-    }
-
-    public void LoadImageFromGallery(View view) {
-
-        Intent galleryIntent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.INTERNAL_CONTENT_URI);
-        startActivityForResult(galleryIntent, LOAD_IMAGE);
-        System.out.println("Gallery ouverte");
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        try {
-            if (requestCode == 0) {
-                switch (resultCode) {
-
-                    case Activity.RESULT_OK:
-                        if (imageFile.exists()) {
-                            //Get absolute path from image
-                            CurrentPhotoPath = imageFile.getAbsolutePath();
-                            Toast.makeText(this, "The file was saved at " + CurrentPhotoPath, Toast.LENGTH_LONG).show();
-                            //return to main activity layout
-                            setContentView(R.layout.activity_main);
-                            ImageView imgView = (ImageView) findViewById(R.id.Pictures_ImageView);
-                            imgView.setImageBitmap(BitmapFactory.decodeFile(String.valueOf(imageFile)));
-                            //Add image to gallery
-                            galleryAddPic();
-                        } else {
-                            Toast.makeText(this, "There was an error saving the file", Toast.LENGTH_LONG).show();
-                        }
-                        break;
-                    case Activity.RESULT_CANCELED:
-                        break;
-                    default:
-                        break;
+                for (int i = 0; i< brandsList.size(); i++){
+                    class_names[i] = brandsList.get(i).getName();
                 }
+                classifiers = new CvSVM[brandsList.size()];
+
+                for (int i = 0; i < brandsList.size(); i++) {
+                    Log.i("Ca marche", "Ok. Creating class name from " + class_names[i]);
+                    //open the file to write the resultant descriptor
+                    classifiers[i] = new CvSVM();
+                    classifiers[i].load(brandsList.get(i).getClassifier().getAbsolutePath());
+                }
+                Log.i("Je valide", "ok");
+                Mat imageTest = imread(currentPhotoPath, 1);
+                System.out.println("Lecture image ok");
+
+                // Using detector to get keypoints
+                detector.detectAndCompute(imageTest, Mat.EMPTY, keypoints, inputDescriptors);
+                System.out.println("Detect ok");
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        Toast.makeText(getApplicationContext(),"Detection ok ! Best match : ",Toast.LENGTH_LONG).show();
+                    }
+                });
+
+                bowide.compute(imageTest, keypoints, response_hist);
+                // Finding best match
+                System.out.println("Compute ok");
+                float minf = Float.MAX_VALUE;
+                String bestMatch = null;
+                long timePrediction = System.currentTimeMillis();
+                // loop for all classes
+                for (int j = 0; j < brandsList.size(); j++) {
+                    // classifier prediction based on reconstructed histogram
+                    float res = classifiers[j].predict(response_hist, true);
+                    //System.out.println(class_names[i] + " is " + res);
+                    if (res < minf) {
+                        minf = res;
+                        bestMatch = class_names[j];
+                    }
+                }
+
+                timePrediction = System.currentTimeMillis() - timePrediction;
+                Log.i("Test", currentPhotoPath + "  predicted as " + bestMatch + " in " + timePrediction + " ms");
+                final Context context = getApplicationContext();
+                for (int i =0; i<brandsList.size(); i++){
+                    if (brandsList.get(i).getName() == bestMatch){
+                        Intent analysisIntent = new Intent(MainActivity.this, Analysis.class);
+                        brandsList.get(i).setUri(getImageUri(context, brandsList.get(i).getImage()));
+                        Bundle extras = new Bundle();
+                        extras.putString("URL", brandsList.get(i).getUrl());
+                        extras.putParcelable("URI", brandsList.get(i).getUri());
+                        analysisIntent.putExtras(extras);
+                        MainActivity.this.startActivity(analysisIntent);
+                    }
+                }
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        progressBar.setVisibility(View.GONE);
+                    }
+                });
             }
-
-        } catch (Exception e) {
-            Toast.makeText(this, "Problème détecté", Toast.LENGTH_LONG).show();
-        }
-
-        try {
-            // When an Image is picked
-            if (requestCode == LOAD_IMAGE && resultCode == RESULT_OK && null != data) {
-
-                // Get the Image from data
-                Uri selectedImage = data.getData();
-                String[] filePathColumn = {MediaStore.Images.Media.DATA};
-
-                // Get the cursor
-                Cursor cursor = getContentResolver().query(selectedImage,
-                        filePathColumn, null, null, null);
-                // Move to first row
-                cursor.moveToFirst();
-                int columnIndex = cursor.getColumnIndex(filePathColumn[0]);
-                ImageString = cursor.getString(columnIndex);
-                cursor.close();
-                setContentView(R.layout.activity_main);
-                ImageView imgView = (ImageView) findViewById(R.id.Pictures_ImageView);
-
-                //requests permission to read a files from user's device
-                ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, READ_PERMISSION);
-
-                // Set the Image in ImageView after decoding the String
-                imgView.setImageBitmap(BitmapFactory.decodeFile(ImageString));
-
-            } else if (requestCode != LOAD_IMAGE && resultCode == RESULT_OK) {
-                Toast.makeText(this, "Voici votre photo", Toast.LENGTH_LONG).show();
-            } else {
-                Toast.makeText(this, "Vous n'avez pas selectionné d'images !", Toast.LENGTH_LONG).show();
-            }
-        } catch (Exception e) {
-            Toast.makeText(this, "Problème détecté", Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private static DMatchVectorVector refineMatches(DMatchVectorVector oldMatches) {
-        // Ratio of Distances
-        double RoD = 0.6;
-        DMatchVectorVector newMatches = new DMatchVectorVector();
-
-        // Refine results 1: Accept only those matches, where best dist is < RoD
-        // of 2nd best match.
-        int sz = 0;
-        newMatches.resize(oldMatches.size());
-
-        double maxDist = 0.0, minDist = 1e100; // infinity
-
-        for (int i = 0; i < oldMatches.size(); i++) {
-            newMatches.resize(i, 1);
-            if (oldMatches.get(i, 0).distance() < RoD
-                    * oldMatches.get(i, 1).distance()) {
-                newMatches.put(sz, 0, oldMatches.get(i, 0));
-                sz++;
-                double distance = oldMatches.get(i, 0).distance();
-                if (distance < minDist)
-                    minDist = distance;
-                if (distance > maxDist)
-                    maxDist = distance;
-            }
-        }
-        newMatches.resize(sz);
-
-        // Refine results 2: accept only those matches which distance is no more
-        // than 3x greater than best match
-        sz = 0;
-        DMatchVectorVector brandNewMatches = new DMatchVectorVector();
-        brandNewMatches.resize(newMatches.size());
-        for (int i = 0; i < newMatches.size(); i++) {
-            // Since minDist may be equal to 0.0, add some non-zero value
-            if (newMatches.get(i, 0).distance() <= 3 * minDist) {
-                brandNewMatches.resize(sz, 1);
-                brandNewMatches.put(sz, 0, newMatches.get(i, 0));
-                sz++;
-            }
-        }
-        brandNewMatches.resize(sz);
-        float Score = 0;
-
-        //Calculation Score
-        for (int i = 0; i < brandNewMatches.size(); i++) {
-            Score += brandNewMatches.get(i, 0).distance();
-        }
-        Score /= brandNewMatches.size();
-        // The Higher score is, the less image match
-        System.out.println("Score : " + Score);
-
-        return brandNewMatches;
+        });
+        Toast.makeText(getApplicationContext(),"Calculating...",Toast.LENGTH_LONG).show();
+        progressBar.setVisibility(View.VISIBLE);
+        imageView.setVisibility(View.GONE);
+        thread.start();
     }
 }

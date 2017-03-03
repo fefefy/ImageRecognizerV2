@@ -4,9 +4,11 @@ import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.hardware.Camera;
 import android.net.Uri;
 import android.os.Build;
@@ -18,7 +20,9 @@ import android.support.v4.content.FileProvider;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
+import android.view.Window;
 import android.widget.Button;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.Toast;
@@ -245,14 +249,14 @@ String test;
             askPermissions();
         }
         //
-        Button camera_button = (Button) findViewById(R.id.CameraButton);
+        ImageButton camera_button = (ImageButton) findViewById(R.id.CameraButton);
         camera_button.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 dispatchTakePictureIntent();
             }
         });
-        Button gallery_button = (Button) findViewById(R.id.galleryButton);
+        ImageButton gallery_button = (ImageButton) findViewById(R.id.galleryButton);
         gallery_button.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -397,7 +401,7 @@ String test;
                 System.out.println("Detect ok");
                 runOnUiThread(new Runnable() {
                     public void run() {
-                        Toast.makeText(getApplicationContext(),"Detection ok ! Best match : ",Toast.LENGTH_LONG).show();
+                        Toast.makeText(getApplicationContext(),"Detection ok ! Best match is...",Toast.LENGTH_LONG).show();
                     }
                 });
 

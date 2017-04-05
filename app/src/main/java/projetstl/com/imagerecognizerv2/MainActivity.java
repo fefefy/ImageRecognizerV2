@@ -65,6 +65,10 @@ import static org.bytedeco.javacpp.opencv_core.cvReleaseFileStorage;
 import static org.bytedeco.javacpp.opencv_features2d.KeyPoint;
 import static org.bytedeco.javacpp.opencv_highgui.imread;
 
+/**
+ * Main activity where it all happens.
+ * Eveything is calcultated in this precise activity
+ */
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
 
     private static final int CAMERA_REQUEST = 1;
@@ -74,7 +78,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     String currentPhotoPath;
     File vocab;
 
+
+    /////////////////////////////
+    // URL A CHANGER SI BESOIN //
+    /////////////////////////////
     String urlRequest = "http://www-rech.telecom-lille.fr/nonfreesift/";
+
+
     List<Brand> brandsList = new ArrayList<>();
     RequestQueue queue;
 
@@ -88,11 +98,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     KeyPoint keypoints = new KeyPoint();
     Mat inputDescriptors = new Mat();
 
+    /**
+     * Needed to access user's local pictures
+     * cf. OnCreate, pb with permissions with gallery
+     */
     protected boolean shouldAskPermissions() {
         return (Build.VERSION.SDK_INT > Build.VERSION_CODES.LOLLIPOP_MR1);
     }
-
-    //cf. OnCreate, pb with permissions with gallery
+    /**
+     * Also needed for permissions
+     */
     @TargetApi(Build.VERSION_CODES.M)
     protected void askPermissions() {
         String[] permissions = {
@@ -103,8 +118,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         requestPermissions(permissions, requestCode);
     }
 
-    //for the camera picture
+    /**
+     * Create the File from taken picture
+     */
     private File createImageFile() throws IOException {
+        /**
+         * Create an image with all it's characteristics (prefix, suffix, storage directory
+         */
 
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
         String imageFileName = "JPEG_" + timeStamp + "_";
@@ -119,19 +139,22 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         return image;
     }
 
-    //Camera picture Intent
+    /**
+     * Camera picture intent
+     */
     private void dispatchTakePictureIntent() {
         Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-
-
         if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
-            // Create the File from taken picture
+
             File photoFile = null;
             try {
                 photoFile = createImageFile();
             } catch (IOException ex) {
             }
-            // if successfull :
+            //
+            /**
+             * if successfull :
+             */
             if (photoFile != null) {
                 System.out.println("Récupération de l'URI photo");
                 Uri photoURI = FileProvider.getUriForFile(this,
@@ -143,16 +166,23 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             }
         }
     }
-String test;
 
-    //2 Crop parts from :
-   // https://github.com/jdamcd/android-crop
+    /**
+     *  2 Crop parts from :
+     * https://github.com/jdamcd/android-crop
+     * Prepare crop
+     */
     private void beginCrop(Uri source) {
+
         Uri destination = Uri.fromFile(new File(getCacheDir(), "cropped"));
         Crop.of(source, destination).withMaxSize(imageView.getHeight(),imageView.getWidth()).start(this);
         System.out.println("Crop OK");
     }
+    /**
+     *  Handles crop
+     */
     private void handleCrop(int resultCode, Intent result) {
+
         if (resultCode == RESULT_OK) {
             imageView.setImageURI(Crop.getOutput(result));
         } else if (resultCode == Crop.RESULT_ERROR) {
@@ -160,8 +190,12 @@ String test;
         }
     }
 
-    //Used by Camera & Gallery
+    /**
+     *Used by Camera & Gallery
+     * Allows images to be printed in the dedicated ImageView
+     */
     private void ImageViewPrint() {
+
 
         // Get View's dimensions
         int targetWidth = imageView.getWidth();
@@ -200,7 +234,10 @@ String test;
         else System.out.println("Error rotating");
     }
 
-    //Methode to create files from data
+    /**
+     *Methode to create files from data
+     *Get the directory for the user's public pictures directory (created if doesn't exists)
+     */
     public static File writeToFile(String data, String fileName)
     {
         // Get the directory for the user's public pictures directory.
@@ -230,14 +267,24 @@ String test;
         return file;
     }
 
+    /**
+     * Gets image's Uri
+     **/
     public Uri getImageUri(Context context, Bitmap inputImage) {
+
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         inputImage.compress(Bitmap.CompressFormat.JPEG, 100, bytes);
         String path = Images.Media.insertImage(context.getContentResolver(), inputImage, "Title", null);
         return Uri.parse(path);
     }
+
+    /**
+     *  onCreate function to set all the app's functions
+     *  (Buttons, Vocabulary, Classifiers...
+     **/
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main_activity);
         progressBar = (ProgressBar) findViewById(R.id.pBar);
@@ -329,7 +376,13 @@ String test;
         });
     }
 
+    /**
+     * onActivity result to handle the user's choice :
+     * Take image from galery, from Camera
+     * And if needed, crop it.
+     **/
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+
         if (requestCode == CAMERA_REQUEST && resultCode == Activity.RESULT_OK) {
             System.out.println("Into Activity Result");
             mustBeRotated = true;
@@ -353,6 +406,7 @@ String test;
             handleCrop(resultCode, data);
         }
     }
+
 
     @Override
     public void onClick(View view) {

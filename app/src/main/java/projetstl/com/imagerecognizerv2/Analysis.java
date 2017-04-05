@@ -10,6 +10,9 @@ import android.view.Window;
 import android.widget.Button;
 import android.widget.ImageView;
 
+/**
+ * This Activity permits to handle the result View and all that it implies
+ */
 public class Analysis extends AppCompatActivity {
     String WebSiteURL;
 

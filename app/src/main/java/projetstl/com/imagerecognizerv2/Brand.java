@@ -19,6 +19,10 @@ import static android.R.attr.maxHeight;
 import static android.R.attr.maxWidth;
 import static android.graphics.Bitmap.Config.RGB_565;
 
+/**
+ * Parses the remote file to get all brands' characteristics
+ * ( Brand name, classifiers ... )
+ */
 public class Brand {
     private String url;
     private String name;
@@ -76,6 +80,9 @@ public class Brand {
 
     }
 
+    /**test
+     *@return image
+     **/
     public Bitmap getImage() {
         return image;
     }

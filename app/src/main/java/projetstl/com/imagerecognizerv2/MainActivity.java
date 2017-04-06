@@ -10,6 +10,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.hardware.Camera;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -82,13 +84,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     /////////////////////////////
     // URL A CHANGER SI BESOIN //
     /////////////////////////////
-    String urlRequest = "http://www-rech.telecom-lille.fr/nonfreesift/";
+//  String urlRequest = "http://www-rech.telecom-lille.fr/nonfreesift/";
+    String urlRequest = "http://www-rech.telecom-lille.fr/freeorb/";
 
 
     List<Brand> brandsList = new ArrayList<>();
     RequestQueue queue;
 
-    boolean mustBeRotated = false;
+    Boolean mustBeRotated;
     SIFT detector;
     FlannBasedMatcher matcher;
     BOWImgDescriptorExtractor bowide;
@@ -112,7 +115,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     protected void askPermissions() {
         String[] permissions = {
                 "android.permission.READ_EXTERNAL_STORAGE",
-                "android.permission.WRITE_EXTERNAL_STORAGE"
+                "android.permission.WRITE_EXTERNAL_STORAGE",
         };
         int requestCode = 200;
         requestPermissions(permissions, requestCode);
@@ -222,14 +225,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         //Rotating image if photo is from camera then print
         System.out.println("valeur de must be rotated " + mustBeRotated);
-        if (mustBeRotated = false){
+        if (mustBeRotated == false){
+            imageView.setRotation(0);
             imageView.setImageBitmap(bitmap);
             System.out.println("on est dans le if");
+            mustBeRotated = null;
+
         }
-        else if (mustBeRotated = true){
+        else if (mustBeRotated == true){
             System.out.println("On est dans le else");
             imageView.setRotation(90);
             imageView.setImageBitmap(bitmap);
+            mustBeRotated = null;
         }
         else System.out.println("Error rotating");
     }
@@ -383,28 +390,27 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
      **/
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
 
-        if (requestCode == CAMERA_REQUEST && resultCode == Activity.RESULT_OK) {
-            System.out.println("Into Activity Result");
-            mustBeRotated = true;
-            ImageViewPrint();
-            System.out.println("Set pic OK ");
-        }
-        if (requestCode == RESULT_LOAD_IMAGE && resultCode == RESULT_OK && null != data) {
-            Uri selectedImage = data.getData();
-            String[] filePathColumn = {Images.Media.DATA};
-            Cursor cursor = getContentResolver().query(selectedImage, filePathColumn, null, null, null);
-            cursor.moveToFirst();
-            int columnIndex = cursor.getColumnIndex(filePathColumn[0]);
-            currentPhotoPath = cursor.getString(columnIndex);
-            cursor.close();
-            imageView.setRotation(0);
-            mustBeRotated = false;
-            ImageViewPrint();
-        }
+            if (requestCode == CAMERA_REQUEST && resultCode == Activity.RESULT_OK) {
+                System.out.println("Into Activity Result");
+                mustBeRotated = true;
+                ImageViewPrint();
+                System.out.println("Set pic OK ");
+            }
+            if (requestCode == RESULT_LOAD_IMAGE && resultCode == RESULT_OK && null != data) {
+                Uri selectedImage = data.getData();
+                String[] filePathColumn = {Images.Media.DATA};
+                Cursor cursor = getContentResolver().query(selectedImage, filePathColumn, null, null, null);
+                cursor.moveToFirst();
+                int columnIndex = cursor.getColumnIndex(filePathColumn[0]);
+                currentPhotoPath = cursor.getString(columnIndex);
+                cursor.close();
+                mustBeRotated = false;
+                ImageViewPrint();
+            }
 
-        if (requestCode == Crop.REQUEST_CROP) {
-            handleCrop(resultCode, data);
-        }
+            if (requestCode == Crop.REQUEST_CROP) {
+                handleCrop(resultCode, data);
+            }
     }
 
 
@@ -504,4 +510,5 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         imageView.setVisibility(View.GONE);
         thread.start();
     }
+
 }
